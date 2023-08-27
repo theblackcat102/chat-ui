@@ -134,7 +134,7 @@
 			>
 				{#each tokens as token}
 					{#if token.lang === "latex"}
-						<LatexBlock lang={token.lang} code={unsanitizeMd(token.text)} /> 
+						<LatexBlock code={unsanitizeMd(token.text)} /> 
 					{:else if token.type === "code"}
 						<CodeBlock lang={token.lang} code={unsanitizeMd(token.text)} />
 					{:else}
