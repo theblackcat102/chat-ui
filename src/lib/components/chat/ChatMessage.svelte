@@ -6,6 +6,7 @@
 	import { page } from "$app/stores";
 
 	import CodeBlock from "../CodeBlock.svelte";
+	import LatexBlock from "../LatexBlock.svelte";
 	import IconLoading from "../icons/IconLoading.svelte";
 	import CarbonRotate360 from "~icons/carbon/rotate-360";
 	import CarbonDownload from "~icons/carbon/download";
@@ -72,7 +73,7 @@
 		breaks: true,
 		renderer,
 	};
-
+	let equ = `$$x = \\frac{t}{3}$$`;
 	$: tokens = marked.lexer(sanitizeMd(message.content));
 
 	afterUpdate(() => {
@@ -132,7 +133,9 @@
 				bind:this={contentEl}
 			>
 				{#each tokens as token}
-					{#if token.type === "code"}
+					{#if token.lang === "latex"}
+						<LatexBlock lang={token.lang} code={unsanitizeMd(token.text)} /> 
+					{:else if token.type === "code"}
 						<CodeBlock lang={token.lang} code={unsanitizeMd(token.text)} />
 					{:else}
 						<!-- eslint-disable-next-line svelte/no-at-html-tags -->
