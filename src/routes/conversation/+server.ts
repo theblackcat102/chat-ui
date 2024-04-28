@@ -34,7 +34,6 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		messages = conversation.messages;
 		values.model = conversation.model;
 	}
-
 	const res = await collections.conversations.insertOne({
 		_id: new ObjectId(),
 		title:

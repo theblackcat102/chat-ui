@@ -73,7 +73,7 @@
 		breaks: true,
 		renderer,
 	};
-
+	let equ = `$$x = \\frac{t}{3}$$`;
 	$: tokens = marked.lexer(sanitizeMd(message.content));
 
 	afterUpdate(() => {
@@ -145,7 +145,7 @@
 			>
 				{#each tokens as token}
 					{#if token.lang === "latex"}
-						<LatexBlock code={unsanitizeMd(token.text)} />
+						<LatexBlock code={unsanitizeMd(token.text)} /> 
 					{:else if token.type === "code"}
 						<CodeBlock lang={token.lang} code={unsanitizeMd(token.text)} />
 					{:else}

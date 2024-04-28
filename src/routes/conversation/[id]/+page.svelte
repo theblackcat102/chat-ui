@@ -3,6 +3,7 @@
 	import { pendingMessage } from "$lib/stores/pendingMessage";
 	import { pendingMessageIdToRetry } from "$lib/stores/pendingMessageIdToRetry";
 	import { onMount } from "svelte";
+	import { createEventDispatcher } from "svelte";
 	import { page } from "$app/stores";
 	import { textGenerationStream, type Options } from "@huggingface/inference";
 	import { invalidate } from "$app/navigation";
@@ -24,6 +25,10 @@
 	let isAborted = false;
 
 	let webSearchMessages: WebSearchMessage[] = [];
+	const dispatch = createEventDispatcher<{
+		deleteConversation: string;
+		editConversationTitle: { id: string; title: string };
+	}>();
 
 	// Since we modify the messages array locally, we don't want to reset it if an old version is passed
 	$: if (data.messages !== lastLoadedMessages) {
@@ -33,6 +38,7 @@
 
 	let loading = false;
 	let pending = false;
+	let previousTitle = undefined;
 	let loginRequired = false;
 
 	async function getTextGenerationStream(
@@ -110,12 +116,13 @@
 					lastMessage.content += output.token.text;
 					messages = [...messages];
 				}
+
 			}
 		}
 	}
 
 	async function summarizeTitle(id: string) {
-		await fetch(`${base}/conversation/${id}/summarize`, {
+		await fetch(`${base}/conversation/${id}/gen-title`, {
 			method: "POST",
 		});
 	}
@@ -138,6 +145,7 @@
 				...messages.slice(0, retryMessageIndex),
 				{ from: "user", content: message, id: messageId },
 			];
+
 
 			let searchResponseId: string | null = "";
 			if ($webSearchParameters.useSearch) {
@@ -197,13 +205,6 @@
 
 			webSearchMessages = [];
 
-			if (messages.filter((m) => m.from === "user").length === 1) {
-				summarizeTitle($page.params.id)
-					.then(() => invalidate(UrlDependency.ConversationList))
-					.catch(console.error);
-			} else {
-				await invalidate(UrlDependency.ConversationList);
-			}
 		} catch (err) {
 			if (err instanceof Error && err.message.includes("overloaded")) {
 				$error = "Too much traffic, please try again.";
@@ -246,8 +247,24 @@
 			});
 		}
 	}
+	console.log(data);
+	function fetchTitle(data) {
+		let t = data.conversations.find((conv) => conv.id === $page.params.id)?.title ?? data.title;
+		console.log(t)
+		if (typeof t === "undefined" || ( typeof t != "undefined" && t.startsWith("Untitled") )) {
+			// this will create an updated title
+			t = summarizeTitle($page.params.id)
+				.then((e) => {
+					invalidate(UrlDependency.ConversationList)
+				})
+				.catch(console.error);
+			dispatch("editConversationTitle", { id: $page.params.id, title: t });
+		}
+		return t;
+	}
 
 	onMount(async () => {
+		// previousTitle = $title;
 		if ($pendingMessage) {
 			const val = $pendingMessage;
 			const messageId = $pendingMessageIdToRetry || undefined;
@@ -258,8 +275,7 @@
 		}
 	});
 	$: $page.params.id, (isAborted = true);
-	$: title = data.conversations.find((conv) => conv.id === $page.params.id)?.title ?? data.title;
-
+	$: title = fetchTitle(data);
 	$: loginRequired =
 		(data.requiresLogin
 			? !data.user

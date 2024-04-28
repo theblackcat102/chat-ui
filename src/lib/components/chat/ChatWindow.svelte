@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { Message } from "$lib/types/Message";
+	import type { Conversation } from "$lib/types/Conversation";
 	import { createEventDispatcher } from "svelte";
+
 
 	import CarbonSendAltFilled from "~icons/carbon/send-alt-filled";
 	import CarbonExport from "~icons/carbon/export";
@@ -32,6 +34,7 @@
 	let loginModalOpen = false;
 	let message: string;
 
+
 	const dispatch = createEventDispatcher<{
 		message: string;
 		share: void;
@@ -41,6 +44,7 @@
 
 	const handleSubmit = () => {
 		if (loading) return;
+
 		dispatch("message", message);
 		message = "";
 	};
