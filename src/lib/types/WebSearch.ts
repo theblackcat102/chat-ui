@@ -3,39 +3,47 @@ import type { Conversation } from "./Conversation";
 import type { Timestamps } from "./Timestamps";
 
 export interface WebSearch extends Timestamps {
-	_id: ObjectId;
-
-	convId: Conversation["_id"];
+	_id?: ObjectId;
+	convId?: Conversation["_id"];
 
 	prompt: string;
 
 	searchQuery: string;
-	results: string[];
-	knowledgeGraph: string;
-	answerBox: string;
-	summary: string;
-
-	messages: WebSearchMessage[];
+	results: WebSearchSource[];
+	contextSources: WebSearchUsedSource[];
 }
 
-export type WebSearchMessageUpdate = {
-	type: "update";
-	message: string;
-	args?: string[];
+export interface WebSearchSource {
+	title: string;
+	link: string;
+	hostname: string;
+	text?: string; // You.com provides text of webpage right away
+}
+
+export interface WebSearchUsedSource extends WebSearchSource {
+	context: { idx: number; text: string }[];
+}
+
+export type WebSearchMessageSources = {
+	type: "sources";
+	sources: WebSearchSource[];
 };
 
-export type WebSearchMessageError = {
-	type: "error";
-	message: string;
-	args?: string[];
-};
+export interface YouWebSearch {
+	hits: YouSearchHit[];
+	latency: number;
+}
 
-export type WebSearchMessageResult = {
-	type: "result";
-	id: string;
-};
+interface YouSearchHit {
+	url: string;
+	title: string;
+	description: string;
+	snippets: string[];
+}
 
-export type WebSearchMessage =
-	| WebSearchMessageUpdate
-	| WebSearchMessageResult
-	| WebSearchMessageError;
+// eslint-disable-next-line no-shadow
+export enum WebSearchProvider {
+	GOOGLE = "Google",
+	YOU = "You.com",
+	SEARXNG = "SearXNG",
+}

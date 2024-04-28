@@ -1,22 +1,25 @@
 <script lang="ts">
 	import ChatWindow from "$lib/components/chat/ChatWindow.svelte";
 	import { pendingMessage } from "$lib/stores/pendingMessage";
-	import { pendingMessageIdToRetry } from "$lib/stores/pendingMessageIdToRetry";
+	import { isAborted } from "$lib/stores/isAborted";
 	import { onMount } from "svelte";
 	import { createEventDispatcher } from "svelte";
 	import { page } from "$app/stores";
-	import { textGenerationStream, type Options } from "@huggingface/inference";
-	import { invalidate } from "$app/navigation";
+	import { goto, invalidateAll } from "$app/navigation";
 	import { base } from "$app/paths";
 	import { shareConversation } from "$lib/shareConversation";
-	import { UrlDependency } from "$lib/types/UrlDependency";
 	import { ERROR_MESSAGES, error } from "$lib/stores/errors";
-	import { randomUUID } from "$lib/utils/randomUuid";
 	import { findCurrentModel } from "$lib/utils/models";
 	import { webSearchParameters } from "$lib/stores/webSearchParameters";
-	import type { WebSearchMessage } from "$lib/types/WebSearch";
 	import type { Message } from "$lib/types/Message";
-	import { PUBLIC_APP_DISCLAIMER } from "$env/static/public";
+	import type { MessageUpdate } from "$lib/types/MessageUpdate";
+	import titleUpdate from "$lib/stores/titleUpdate";
+	import file2base64 from "$lib/utils/file2base64";
+	import { addChildren } from "$lib/utils/tree/addChildren";
+	import { addSibling } from "$lib/utils/tree/addSibling";
+	import { fetchMessageUpdates } from "$lib/utils/messageUpdates";
+	import { createConvTreeStore } from "$lib/stores/convTree";
+	import type { v4 } from "uuid";
 
 	export let data;
 
@@ -40,48 +43,34 @@
 	let pending = false;
 	let previousTitle = undefined;
 	let loginRequired = false;
+	$: ({ messages } = data);
 
-	async function getTextGenerationStream(
-		inputs: string,
-		messageId: string,
-		isRetry = false,
-		webSearchId?: string
-	) {
-		let conversationId = $page.params.id;
-		const responseId = randomUUID();
 
-		const response = textGenerationStream(
-			{
-				model: $page.url.href,
-				inputs,
-				parameters: {
-					...data.models.find((m) => m.id === data.model)?.parameters,
-					return_full_text: false,
+	let files: File[] = [];
+
+	async function convFromShared() {
+		try {
+			loading = true;
+			const res = await fetch(`${base}/conversation`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
 				},
-			},
-			{
-				id: messageId,
-				response_id: responseId,
-				is_retry: isRetry,
-				use_cache: false,
-				web_search_id: webSearchId,
-			} as Options
-		);
+				body: JSON.stringify({
+					fromShare: $page.params.id,
+					model: data.model,
+				}),
+			});
 
-		for await (const output of response) {
-			pending = false;
-
-			if (!output) {
-				break;
+			if (!res.ok) {
+				error.set(await res.text());
+				console.error("Error while creating conversation: " + (await res.text()));
+				return;
 			}
 
-			if (conversationId !== $page.params.id) {
-				fetch(`${base}/conversation/${conversationId}/stop-generating`, {
-					method: "POST",
-				}).catch(console.error);
-				break;
-			}
+			const { conversationId } = await res.json();
 
+<<<<<<< HEAD
 			if (isAborted) {
 				isAborted = false;
 				fetch(`${base}/conversation/${conversationId}/stop-generating`, {
@@ -130,81 +119,221 @@
 	async function writeMessage(message: string, messageId = randomUUID()) {
 		if (!message.trim()) return;
 
+=======
+			return conversationId;
+		} catch (err) {
+			error.set(ERROR_MESSAGES.default);
+			console.error(String(err));
+			throw err;
+		}
+	}
+	// this function is used to send new message to the backends
+	async function writeMessage({
+		prompt,
+		messageId = $convTreeStore.leaf ?? undefined,
+		isRetry = false,
+		isContinue = false,
+	}: {
+		prompt?: string;
+		messageId?: ReturnType<typeof v4>;
+		isRetry?: boolean;
+		isContinue?: boolean;
+	}): Promise<void> {
+>>>>>>> e3ca107b9dbb93cfa4757c6829dfd47482eef37a
 		try {
-			isAborted = false;
+			$isAborted = false;
 			loading = true;
 			pending = true;
 
-			let retryMessageIndex = messages.findIndex((msg) => msg.id === messageId);
-			const isRetry = retryMessageIndex !== -1;
-			if (!isRetry) {
-				retryMessageIndex = messages.length;
-			}
+			const module = await import("browser-image-resizer");
+			// currently, only IDEFICS is supported by TGI
+			// the size of images is hardcoded to 224x224 in TGI
+			// this will need to be configurable when support for more models is added
+			const resizedImages = await Promise.all(
+				files.map(async (file) => {
+					return await module
+						.readAndCompressImage(file, {
+							maxHeight: 224,
+							maxWidth: 224,
+							quality: 1,
+						})
+						.then(async (el) => await file2base64(el as File));
+				})
+			);
 
-			messages = [
-				...messages.slice(0, retryMessageIndex),
-				{ from: "user", content: message, id: messageId },
-			];
+			let messageToWriteToId: Message["id"] | undefined = undefined;
+			// used for building the prompt, subtree of the conversation that goes from the latest message to the root
 
+<<<<<<< HEAD
 
 			let searchResponseId: string | null = "";
 			if ($webSearchParameters.useSearch) {
 				webSearchMessages = [];
+=======
+			if (isContinue && messageId) {
+				if ((messages.find((msg) => msg.id === messageId)?.children?.length ?? 0) > 0) {
+					$error = "Can only continue the last message";
+				} else {
+					messageToWriteToId = messageId;
+				}
+			} else if (isRetry && messageId) {
+				// two cases, if we're retrying a user message with a newPrompt set,
+				// it means we're editing a user message
+				// if we're retrying on an assistant message, newPrompt cannot be set
+				// it means we're retrying the last assistant message for a new answer
+>>>>>>> e3ca107b9dbb93cfa4757c6829dfd47482eef37a
 
-				const res = await fetch(
-					`${base}/conversation/${$page.params.id}/web-search?` +
-						new URLSearchParams({ prompt: message }),
+				const messageToRetry = messages.find((message) => message.id === messageId);
+
+				if (!messageToRetry) {
+					$error = "Message not found";
+				}
+
+				if (messageToRetry?.from === "user" && prompt) {
+					// add a sibling to this message from the user, with the alternative prompt
+					// add a children to that sibling, where we can write to
+					const newUserMessageId = addSibling(
+						{
+							messages,
+							rootMessageId: data.rootMessageId,
+						},
+						{ from: "user", content: prompt },
+						messageId
+					);
+					messageToWriteToId = addChildren(
+						{
+							messages,
+							rootMessageId: data.rootMessageId,
+						},
+						{ from: "assistant", content: "", files: resizedImages },
+						newUserMessageId
+					);
+				} else if (messageToRetry?.from === "assistant") {
+					// we're retrying an assistant message, to generate a new answer
+					// just add a sibling to the assistant answer where we can write to
+					messageToWriteToId = addSibling(
+						{
+							messages,
+							rootMessageId: data.rootMessageId,
+						},
+						{ from: "assistant", content: "" },
+						messageId
+					);
+				}
+			} else {
+				// just a normal linear conversation, so we add the user message
+				// and the blank assistant message back to back
+				const newUserMessageId = addChildren(
 					{
-						method: "GET",
-					}
+						messages,
+						rootMessageId: data.rootMessageId,
+					},
+					{
+						from: "user",
+						content: prompt ?? "",
+						files: resizedImages,
+						createdAt: new Date(),
+						updatedAt: new Date(),
+					},
+					messageId
 				);
 
-				// required bc linting doesn't see TextDecoderStream for some reason?
-				// eslint-disable-next-line no-undef
-				const encoder = new TextDecoderStream();
-				const reader = res?.body?.pipeThrough(encoder).getReader();
+				if (!data.rootMessageId) {
+					data.rootMessageId = newUserMessageId;
+				}
 
-				while (searchResponseId === "") {
-					await new Promise((r) => setTimeout(r, 25));
+				messageToWriteToId = addChildren(
+					{
+						messages,
+						rootMessageId: data.rootMessageId,
+					},
+					{
+						from: "assistant",
+						content: "",
+						createdAt: new Date(),
+						updatedAt: new Date(),
+					},
+					newUserMessageId
+				);
+			}
 
-					if (isAborted) {
-						reader?.cancel();
-						return;
+			messages = [...messages];
+			const messageToWriteTo = messages.find((message) => message.id === messageToWriteToId);
+			if (!messageToWriteTo) {
+				throw new Error("Message to write to not found");
+			}
+
+			// disable websearch if assistant is present
+			const hasAssistant = !!$page.data.assistant;
+			const messageUpdatesAbortController = new AbortController();
+			const messageUpdatesIterator = await fetchMessageUpdates(
+				$page.params.id,
+				{
+					base,
+					inputs: prompt,
+					messageId,
+					isRetry,
+					isContinue,
+					webSearch: !hasAssistant && $webSearchParameters.useSearch,
+					files: isRetry ? undefined : resizedImages,
+				},
+				messageUpdatesAbortController.signal
+			).catch((err) => {
+				error.set(err.message);
+			});
+			if (messageUpdatesIterator === undefined) return;
+
+			files = [];
+
+			const messageUpdates: MessageUpdate[] = [];
+			for await (const update of messageUpdatesIterator) {
+				if ($isAborted) {
+					messageUpdatesAbortController.abort();
+					return;
+				}
+				if (update.type === "finalAnswer") {
+					loading = false;
+					pending = false;
+					break;
+				}
+
+				messageUpdates.push(update);
+
+				if (update.type === "stream") {
+					pending = false;
+					messageToWriteTo.content += update.token;
+					messages = [...messages];
+				} else if (update.type === "webSearch") {
+					messageToWriteTo.updates = [...(messageToWriteTo.updates ?? []), update];
+					messages = [...messages];
+				} else if (update.type === "status") {
+					if (update.status === "title" && update.message) {
+						const convInData = data.conversations.find(({ id }) => id === $page.params.id);
+						if (convInData) {
+							convInData.title = update.message;
+
+							$titleUpdate = {
+								title: update.message,
+								convId: $page.params.id,
+							};
+						}
+					} else if (update.status === "error") {
+						$error = update.message ?? "An error has occurred";
 					}
-
-					reader
-						?.read()
-						.then(async ({ done, value }) => {
-							if (done) {
-								reader.cancel();
-								return;
-							}
-
-							try {
-								webSearchMessages = (JSON.parse(value) as { messages: WebSearchMessage[] })
-									.messages;
-							} catch (parseError) {
-								// in case of parsing error we wait for the next message
-								return;
-							}
-
-							const lastSearchMessage = webSearchMessages[webSearchMessages.length - 1];
-							if (lastSearchMessage.type === "result") {
-								searchResponseId = lastSearchMessage.id;
-								reader.cancel();
-								return;
-							}
-						})
-						.catch(() => {
-							searchResponseId = null;
-						});
+				} else if (update.type === "error") {
+					error.set(update.message);
+					messageUpdatesAbortController.abort();
 				}
 			}
 
+<<<<<<< HEAD
 			await getTextGenerationStream(message, messageId, isRetry, searchResponseId ?? undefined);
 
 			webSearchMessages = [];
 
+=======
+			messageToWriteTo.updates = messageUpdates;
+>>>>>>> e3ca107b9dbb93cfa4757c6829dfd47482eef37a
 		} catch (err) {
 			if (err instanceof Error && err.message.includes("overloaded")) {
 				$error = "Too much traffic, please try again.";
@@ -219,6 +348,7 @@
 		} finally {
 			loading = false;
 			pending = false;
+			await invalidateAll();
 		}
 	}
 
@@ -230,7 +360,7 @@
 		messages = messages.map((message) => {
 			if (message.id === messageId) {
 				oldScore = message.score;
-				return { ...message, score: score };
+				return { ...message, score };
 			}
 			return message;
 		});
@@ -264,16 +394,18 @@
 	}
 
 	onMount(async () => {
+<<<<<<< HEAD
 		// previousTitle = $title;
+=======
+		// only used in case of creating new conversations (from the parent POST endpoint)
+>>>>>>> e3ca107b9dbb93cfa4757c6829dfd47482eef37a
 		if ($pendingMessage) {
-			const val = $pendingMessage;
-			const messageId = $pendingMessageIdToRetry || undefined;
-			$pendingMessage = "";
-			$pendingMessageIdToRetry = null;
-
-			writeMessage(val, messageId);
+			files = $pendingMessage.files;
+			await writeMessage({ prompt: $pendingMessage.content });
+			$pendingMessage = undefined;
 		}
 	});
+<<<<<<< HEAD
 	$: $page.params.id, (isAborted = true);
 	$: title = fetchTitle(data);
 	$: loginRequired =
@@ -281,25 +413,95 @@
 			? !data.user
 			: !data.settings.ethicsModalAcceptedAt && !!PUBLIC_APP_DISCLAIMER) &&
 		messages.length >= data.messagesBeforeLogin;
+=======
+
+	async function onMessage(event: CustomEvent<string>) {
+		if (!data.shared) {
+			await writeMessage({ prompt: event.detail });
+		} else {
+			await convFromShared()
+				.then(async (convId) => {
+					await goto(`${base}/conversation/${convId}`, { invalidateAll: true });
+				})
+				.then(async () => await writeMessage({ prompt: event.detail }))
+				.finally(() => (loading = false));
+		}
+	}
+
+	async function onRetry(event: CustomEvent<{ id: Message["id"]; content?: string }>) {
+		if (!data.shared) {
+			await writeMessage({
+				prompt: event.detail.content,
+				messageId: event.detail.id,
+				isRetry: true,
+			});
+		} else {
+			await convFromShared()
+				.then(async (convId) => {
+					await goto(`${base}/conversation/${convId}`, { invalidateAll: true });
+				})
+				.then(
+					async () =>
+						await writeMessage({
+							prompt: event.detail.content,
+							messageId: event.detail.id,
+							isRetry: true,
+						})
+				)
+				.finally(() => (loading = false));
+		}
+	}
+
+	async function onContinue(event: CustomEvent<{ id: Message["id"] }>) {
+		if (!data.shared) {
+			writeMessage({ messageId: event.detail.id, isContinue: true });
+		} else {
+			await convFromShared()
+				.then(async (convId) => {
+					await goto(`${base}/conversation/${convId}`, { invalidateAll: true });
+				})
+				.then(
+					async () =>
+						await writeMessage({
+							messageId: event.detail.id,
+							isContinue: true,
+						})
+				)
+				.finally(() => (loading = false));
+		}
+	}
+
+	$: $page.params.id, (($isAborted = true), (loading = false), ($convTreeStore.editing = null));
+	$: title = data.conversations.find((conv) => conv.id === $page.params.id)?.title ?? data.title;
+
+	const convTreeStore = createConvTreeStore();
+>>>>>>> e3ca107b9dbb93cfa4757c6829dfd47482eef37a
 </script>
 
 <svelte:head>
 	<title>{title}</title>
+	<link
+		rel="stylesheet"
+		href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css"
+		integrity="sha384-GvrOXuhMATgEsSwCs4smul74iXGOixntILdUW9XmUC6+HX0sLNAK3q71HotJqlAn"
+		crossorigin="anonymous"
+	/>
 </svelte:head>
 
 <ChatWindow
 	{loading}
 	{pending}
 	{messages}
-	bind:webSearchMessages
-	searches={{ ...data.searches }}
-	on:message={(event) => writeMessage(event.detail)}
-	on:retry={(event) => writeMessage(event.detail.content, event.detail.id)}
+	shared={data.shared}
+	preprompt={data.preprompt}
+	bind:files
+	on:message={onMessage}
+	on:retry={onRetry}
+	on:continue={onContinue}
 	on:vote={(event) => voteMessage(event.detail.score, event.detail.id)}
 	on:share={() => shareConversation($page.params.id, data.title)}
-	on:stop={() => (isAborted = true)}
+	on:stop={() => (($isAborted = true), (loading = false))}
 	models={data.models}
 	currentModel={findCurrentModel([...data.models, ...data.oldModels], data.model)}
-	settings={data.settings}
-	{loginRequired}
+	assistant={data.assistant}
 />

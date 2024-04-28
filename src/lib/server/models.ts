@@ -1,140 +1,201 @@
-import { HF_ACCESS_TOKEN, MODELS, OLD_MODELS } from "$env/static/private";
-import type {
-	ChatTemplateInput,
-	WebSearchQueryTemplateInput,
-	WebSearchSummaryTemplateInput,
-} from "$lib/types/Template";
+import {
+	HF_TOKEN,
+	HF_API_ROOT,
+	MODELS,
+	OLD_MODELS,
+	TASK_MODEL,
+	HF_ACCESS_TOKEN,
+} from "$env/static/private";
+import type { ChatTemplateInput } from "$lib/types/Template";
 import { compileTemplate } from "$lib/utils/template";
 import { z } from "zod";
+import endpoints, { endpointSchema, type Endpoint } from "./endpoints/endpoints";
+import endpointTgi from "./endpoints/tgi/endpointTgi";
+import { sum } from "$lib/utils/sum";
+import { embeddingModels, validateEmbeddingModelByName } from "./embeddingModels";
+
+import type { PreTrainedTokenizer } from "@xenova/transformers";
+
+import JSON5 from "json5";
+import { getTokenizer } from "$lib/utils/getTokenizer";
 
 type Optional<T, K extends keyof T> = Pick<Partial<T>, K> & Omit<T, K>;
 
-const sagemakerEndpoint = z.object({
-	host: z.literal("sagemaker"),
-	url: z.string().url(),
-	accessKey: z.string().min(1),
-	secretKey: z.string().min(1),
-	sessionToken: z.string().optional(),
-});
-
-const tgiEndpoint = z.object({
-	host: z.union([z.literal("tgi"), z.undefined()]),
-	url: z.string().url(),
-	authorization: z.string().min(1).default(`Bearer ${HF_ACCESS_TOKEN}`),
-});
-
-const commonEndpoint = z.object({
-	weight: z.number().int().positive().default(1),
-});
-
-const endpoint = z.lazy(() =>
-	z.union([sagemakerEndpoint.merge(commonEndpoint), tgiEndpoint.merge(commonEndpoint)])
-);
-
-const combinedEndpoint = endpoint.transform((data) => {
-	if (data.host === "tgi" || data.host === undefined) {
-		return tgiEndpoint.merge(commonEndpoint).parse(data);
-	} else if (data.host === "sagemaker") {
-		return sagemakerEndpoint.merge(commonEndpoint).parse(data);
-	} else {
-		throw new Error(`Invalid host: ${data.host}`);
-	}
-});
-
-const modelsRaw = z
-	.array(
-		z.object({
-			/** Used as an identifier in DB */
-			id: z.string().optional(),
-			/** Used to link to the model page, and for inference */
-			name: z.string().min(1),
-			displayName: z.string().min(1).optional(),
-			description: z.string().min(1).optional(),
-			websiteUrl: z.string().url().optional(),
-			modelUrl: z.string().url().optional(),
-			datasetName: z.string().min(1).optional(),
-			datasetUrl: z.string().url().optional(),
-			userMessageToken: z.string().default(""),
-			userMessageEndToken: z.string().default(""),
-			assistantMessageToken: z.string().default(""),
-			assistantMessageEndToken: z.string().default(""),
-			messageEndToken: z.string().default(""),
-			preprompt: z.string().default(""),
-			prepromptUrl: z.string().url().optional(),
-			chatPromptTemplate: z
-				.string()
-				.default(
-					"{{preprompt}}" +
-						"{{#each messages}}" +
-						"{{#ifUser}}{{@root.userMessageToken}}{{content}}{{@root.userMessageEndToken}}{{/ifUser}}" +
-						"{{#ifAssistant}}{{@root.assistantMessageToken}}{{content}}{{@root.assistantMessageEndToken}}{{/ifAssistant}}" +
-						"{{/each}}" +
-						"{{assistantMessageToken}}"
-				),
-			webSearchSummaryPromptTemplate: z
-				.string()
-				.default(
-					"{{userMessageToken}}{{answer}}{{userMessageEndToken}}" +
-						"{{userMessageToken}}" +
-						"The text above should be summarized to best answer the query: {{query}}." +
-						"{{userMessageEndToken}}" +
-						"{{assistantMessageToken}}Summary: "
-				),
-			webSearchQueryPromptTemplate: z
-				.string()
-				.default(
-					"{{userMessageToken}}" +
-						"The following messages were written by a user, trying to answer a question." +
-						"{{userMessageEndToken}}" +
-						"{{#each messages}}" +
-						"{{#ifUser}}{{@root.userMessageToken}}{{content}}{{@root.userMessageEndToken}}{{/ifUser}}" +
-						"{{/each}}" +
-						"{{userMessageToken}}" +
-						"What plain-text english sentence would you input into Google to answer the last question? Answer with a short (10 words max) simple sentence." +
-						"{{userMessageEndToken}}" +
-						"{{assistantMessageToken}}Query: "
-				),
-			promptExamples: z
-				.array(
-					z.object({
-						title: z.string().min(1),
-						prompt: z.string().min(1),
-					})
-				)
-				.optional(),
-			endpoints: z.array(combinedEndpoint).optional(),
-			parameters: z
-				.object({
-					temperature: z.number().min(0).max(1),
-					truncate: z.number().int().positive(),
-					max_new_tokens: z.number().int().positive(),
-					stop: z.array(z.string()).optional(),
-				})
-				.passthrough()
-				.optional(),
+const modelConfig = z.object({
+	/** Used as an identifier in DB */
+	id: z.string().optional(),
+	/** Used to link to the model page, and for inference */
+	name: z.string().default(""),
+	displayName: z.string().min(1).optional(),
+	description: z.string().min(1).optional(),
+	logoUrl: z.string().url().optional(),
+	websiteUrl: z.string().url().optional(),
+	modelUrl: z.string().url().optional(),
+	tokenizer: z
+		.union([
+			z.string(),
+			z.object({
+				tokenizerUrl: z.string().url(),
+				tokenizerConfigUrl: z.string().url(),
+			}),
+		])
+		.optional(),
+	datasetName: z.string().min(1).optional(),
+	datasetUrl: z.string().url().optional(),
+	preprompt: z.string().default(""),
+	prepromptUrl: z.string().url().optional(),
+	chatPromptTemplate: z.string().optional(),
+	promptExamples: z
+		.array(
+			z.object({
+				title: z.string().min(1),
+				prompt: z.string().min(1),
+			})
+		)
+		.optional(),
+	endpoints: z.array(endpointSchema).optional(),
+	parameters: z
+		.object({
+			temperature: z.number().min(0).max(1).optional(),
+			truncate: z.number().int().positive().optional(),
+			max_new_tokens: z.number().int().positive().optional(),
+			stop: z.array(z.string()).optional(),
+			top_p: z.number().positive().optional(),
+			top_k: z.number().positive().optional(),
+			repetition_penalty: z.number().min(-2).max(2).optional(),
 		})
-	)
-	.parse(JSON.parse(MODELS));
+		.passthrough()
+		.optional(),
+	multimodal: z.boolean().default(false),
+	unlisted: z.boolean().default(false),
+	embeddingModel: validateEmbeddingModelByName(embeddingModels).optional(),
+});
 
-export const models = await Promise.all(
-	modelsRaw.map(async (m) => ({
-		...m,
-		userMessageEndToken: m?.userMessageEndToken || m?.messageEndToken,
-		assistantMessageEndToken: m?.assistantMessageEndToken || m?.messageEndToken,
-		chatPromptRender: compileTemplate<ChatTemplateInput>(m.chatPromptTemplate, m),
-		webSearchSummaryPromptRender: compileTemplate<WebSearchSummaryTemplateInput>(
-			m.webSearchSummaryPromptTemplate,
+const modelsRaw = z.array(modelConfig).parse(JSON5.parse(MODELS));
+
+async function getChatPromptRender(
+	m: z.infer<typeof modelConfig>
+): Promise<ReturnType<typeof compileTemplate<ChatTemplateInput>>> {
+	if (m.chatPromptTemplate) {
+		return compileTemplate<ChatTemplateInput>(m.chatPromptTemplate, m);
+	}
+	let tokenizer: PreTrainedTokenizer;
+
+	if (!m.tokenizer) {
+		return compileTemplate<ChatTemplateInput>(
+			"{{#if @root.preprompt}}<|im_start|>system\n{{@root.preprompt}}<|im_end|>\n{{/if}}{{#each messages}}{{#ifUser}}<|im_start|>user\n{{content}}<|im_end|>\n<|im_start|>assistant\n{{/ifUser}}{{#ifAssistant}}{{content}}<|im_end|>\n{{/ifAssistant}}{{/each}}",
 			m
-		),
-		webSearchQueryPromptRender: compileTemplate<WebSearchQueryTemplateInput>(
-			m.webSearchQueryPromptTemplate,
-			m
-		),
-		id: m.id || m.name,
-		displayName: m.displayName || m.name,
-		preprompt: m.prepromptUrl ? await fetch(m.prepromptUrl).then((r) => r.text()) : m.preprompt,
-	}))
-);
+		);
+	}
+
+	try {
+		tokenizer = await getTokenizer(m.tokenizer);
+	} catch (e) {
+		console.error(
+			"Failed to load tokenizer for model " +
+				m.name +
+				" consider setting chatPromptTemplate manually or making sure the model is available on the hub. Error: " +
+				(e as Error).message
+		);
+		process.exit();
+	}
+
+	const renderTemplate = ({ messages, preprompt }: ChatTemplateInput) => {
+		let formattedMessages: { role: string; content: string }[] = messages.map((message) => ({
+			content: message.content,
+			role: message.from,
+		}));
+
+		if (preprompt) {
+			formattedMessages = [
+				{
+					role: "system",
+					content: preprompt,
+				},
+				...formattedMessages,
+			];
+		}
+
+		const output = tokenizer.apply_chat_template(formattedMessages, {
+			tokenize: false,
+			add_generation_prompt: true,
+		});
+
+		if (typeof output !== "string") {
+			throw new Error("Failed to apply chat template, the output is not a string");
+		}
+
+		return output;
+	};
+
+	return renderTemplate;
+}
+
+const processModel = async (m: z.infer<typeof modelConfig>) => ({
+	...m,
+	chatPromptRender: await getChatPromptRender(m),
+	id: m.id || m.name,
+	displayName: m.displayName || m.name,
+	preprompt: m.prepromptUrl ? await fetch(m.prepromptUrl).then((r) => r.text()) : m.preprompt,
+	parameters: { ...m.parameters, stop_sequences: m.parameters?.stop },
+});
+
+const addEndpoint = (m: Awaited<ReturnType<typeof processModel>>) => ({
+	...m,
+	getEndpoint: async (): Promise<Endpoint> => {
+		if (!m.endpoints) {
+			return endpointTgi({
+				type: "tgi",
+				url: `${HF_API_ROOT}/${m.name}`,
+				accessToken: HF_TOKEN ?? HF_ACCESS_TOKEN,
+				weight: 1,
+				model: m,
+			});
+		}
+		const totalWeight = sum(m.endpoints.map((e) => e.weight));
+
+		let random = Math.random() * totalWeight;
+
+		for (const endpoint of m.endpoints) {
+			if (random < endpoint.weight) {
+				const args = { ...endpoint, model: m };
+
+				switch (args.type) {
+					case "tgi":
+						return endpoints.tgi(args);
+					case "anthropic":
+						return endpoints.anthropic(args);
+					case "aws":
+						return await endpoints.aws(args);
+					case "openai":
+						return await endpoints.openai(args);
+					case "llamacpp":
+						return endpoints.llamacpp(args);
+					case "ollama":
+						return endpoints.ollama(args);
+					case "vertex":
+						return await endpoints.vertex(args);
+					case "cloudflare":
+						return await endpoints.cloudflare(args);
+					case "cohere":
+						return await endpoints.cohere(args);
+					case "langserve":
+						return await endpoints.langserve(args);
+					default:
+						// for legacy reason
+						return endpoints.tgi(args);
+				}
+			}
+			random -= endpoint.weight;
+		}
+
+		throw new Error(`Failed to select endpoint`);
+	},
+});
+
+export const models = await Promise.all(modelsRaw.map((e) => processModel(e).then(addEndpoint)));
+
+export const defaultModel = models[0];
 
 // Models that have been deprecated
 export const oldModels = OLD_MODELS
@@ -146,16 +207,26 @@ export const oldModels = OLD_MODELS
 					displayName: z.string().min(1).optional(),
 				})
 			)
-			.parse(JSON.parse(OLD_MODELS))
+			.parse(JSON5.parse(OLD_MODELS))
 			.map((m) => ({ ...m, id: m.id || m.name, displayName: m.displayName || m.name }))
 	: [];
-
-export type BackendModel = Optional<(typeof models)[0], "preprompt">;
-export type Endpoint = z.infer<typeof endpoint>;
-
-export const defaultModel = models[0];
 
 export const validateModel = (_models: BackendModel[]) => {
 	// Zod enum function requires 2 parameters
 	return z.enum([_models[0].id, ..._models.slice(1).map((m) => m.id)]);
 };
+
+// if `TASK_MODEL` is string & name of a model in `MODELS`, then we use `MODELS[TASK_MODEL]`, else we try to parse `TASK_MODEL` as a model config itself
+
+export const smallModel = TASK_MODEL
+	? (models.find((m) => m.name === TASK_MODEL) ||
+			(await processModel(modelConfig.parse(JSON5.parse(TASK_MODEL))).then((m) =>
+				addEndpoint(m)
+			))) ??
+	  defaultModel
+	: defaultModel;
+
+export type BackendModel = Optional<
+	typeof defaultModel,
+	"preprompt" | "parameters" | "multimodal" | "unlisted"
+>;
