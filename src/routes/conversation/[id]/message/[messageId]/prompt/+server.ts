@@ -2,18 +2,23 @@ import { buildPrompt } from "$lib/buildPrompt";
 import { authCondition } from "$lib/server/auth";
 import { collections } from "$lib/server/database";
 import { models } from "$lib/server/models";
+import { buildSubtree } from "$lib/utils/tree/buildSubtree";
+import { isMessageId } from "$lib/utils/tree/isMessageId";
 import { error } from "@sveltejs/kit";
 import { ObjectId } from "mongodb";
 
 export async function GET({ params, locals }) {
-	const convId = new ObjectId(params.id);
+	const conv =
+		params.id.length === 7
+			? await collections.sharedConversations.findOne({
+					_id: params.id,
+			  })
+			: await collections.conversations.findOne({
+					_id: new ObjectId(params.id),
+					...authCondition(locals),
+			  });
 
-	const conv = await collections.conversations.findOne({
-		_id: convId,
-		...authCondition(locals),
-	});
-
-	if (!conv) {
+	if (conv === null) {
 		throw error(404, "Conversation not found");
 	}
 
@@ -21,7 +26,7 @@ export async function GET({ params, locals }) {
 
 	const messageIndex = conv.messages.findIndex((msg) => msg.id === messageId);
 
-	if (messageIndex === -1) {
+	if (!isMessageId(messageId) || messageIndex === -1) {
 		throw error(404, "Message not found");
 	}
 
@@ -31,9 +36,12 @@ export async function GET({ params, locals }) {
 		throw error(404, "Conversation model not found");
 	}
 
+	const messagesUpTo = buildSubtree(conv, messageId);
+
 	const prompt = await buildPrompt({
-		messages: conv.messages.slice(0, messageIndex + 1),
-		model: model,
+		preprompt: conv.preprompt,
+		messages: messagesUpTo,
+		model,
 	});
 
 	return new Response(
