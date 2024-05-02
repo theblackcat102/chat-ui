@@ -3,7 +3,6 @@
 	import { pendingMessage } from "$lib/stores/pendingMessage";
 	import { isAborted } from "$lib/stores/isAborted";
 	import { onMount } from "svelte";
-	import { createEventDispatcher } from "svelte";
 	import { page } from "$app/stores";
 	import { goto, invalidateAll } from "$app/navigation";
 	import { base } from "$app/paths";
@@ -23,28 +22,10 @@
 
 	export let data;
 
-	let messages = data.messages;
-	let lastLoadedMessages = data.messages;
-	let isAborted = false;
-
-	let webSearchMessages: WebSearchMessage[] = [];
-	const dispatch = createEventDispatcher<{
-		deleteConversation: string;
-		editConversationTitle: { id: string; title: string };
-	}>();
-
-	// Since we modify the messages array locally, we don't want to reset it if an old version is passed
-	$: if (data.messages !== lastLoadedMessages) {
-		messages = data.messages;
-		lastLoadedMessages = data.messages;
-	}
+	$: ({ messages } = data);
 
 	let loading = false;
 	let pending = false;
-	let previousTitle = undefined;
-	let loginRequired = false;
-	$: ({ messages } = data);
-
 
 	let files: File[] = [];
 
@@ -70,56 +51,6 @@
 
 			const { conversationId } = await res.json();
 
-<<<<<<< HEAD
-			if (isAborted) {
-				isAborted = false;
-				fetch(`${base}/conversation/${conversationId}/stop-generating`, {
-					method: "POST",
-				}).catch(console.error);
-				break;
-			}
-
-			// final message
-			if (output.generated_text) {
-				const lastMessage = messages[messages.length - 1];
-
-				if (lastMessage) {
-					lastMessage.content = output.generated_text;
-					lastMessage.webSearchId = webSearchId;
-					messages = [...messages];
-				}
-				break;
-			}
-
-			if (!output.token.special) {
-				const lastMessage = messages[messages.length - 1];
-
-				if (lastMessage?.from !== "assistant") {
-					// First token has a space at the beginning, trim it
-					messages = [
-						...messages,
-						// id doesn't match the backend id but it's not important for assistant messages
-						{ from: "assistant", content: output.token.text.trimStart(), id: responseId },
-					];
-				} else {
-					lastMessage.content += output.token.text;
-					messages = [...messages];
-				}
-
-			}
-		}
-	}
-
-	async function summarizeTitle(id: string) {
-		await fetch(`${base}/conversation/${id}/gen-title`, {
-			method: "POST",
-		});
-	}
-
-	async function writeMessage(message: string, messageId = randomUUID()) {
-		if (!message.trim()) return;
-
-=======
 			return conversationId;
 		} catch (err) {
 			error.set(ERROR_MESSAGES.default);
@@ -139,7 +70,6 @@
 		isRetry?: boolean;
 		isContinue?: boolean;
 	}): Promise<void> {
->>>>>>> e3ca107b9dbb93cfa4757c6829dfd47482eef37a
 		try {
 			$isAborted = false;
 			loading = true;
@@ -164,12 +94,6 @@
 			let messageToWriteToId: Message["id"] | undefined = undefined;
 			// used for building the prompt, subtree of the conversation that goes from the latest message to the root
 
-<<<<<<< HEAD
-
-			let searchResponseId: string | null = "";
-			if ($webSearchParameters.useSearch) {
-				webSearchMessages = [];
-=======
 			if (isContinue && messageId) {
 				if ((messages.find((msg) => msg.id === messageId)?.children?.length ?? 0) > 0) {
 					$error = "Can only continue the last message";
@@ -181,7 +105,6 @@
 				// it means we're editing a user message
 				// if we're retrying on an assistant message, newPrompt cannot be set
 				// it means we're retrying the last assistant message for a new answer
->>>>>>> e3ca107b9dbb93cfa4757c6829dfd47482eef37a
 
 				const messageToRetry = messages.find((message) => message.id === messageId);
 
@@ -326,14 +249,7 @@
 				}
 			}
 
-<<<<<<< HEAD
-			await getTextGenerationStream(message, messageId, isRetry, searchResponseId ?? undefined);
-
-			webSearchMessages = [];
-
-=======
 			messageToWriteTo.updates = messageUpdates;
->>>>>>> e3ca107b9dbb93cfa4757c6829dfd47482eef37a
 		} catch (err) {
 			if (err instanceof Error && err.message.includes("overloaded")) {
 				$error = "Too much traffic, please try again.";
@@ -377,43 +293,15 @@
 			});
 		}
 	}
-	console.log(data);
-	function fetchTitle(data) {
-		let t = data.conversations.find((conv) => conv.id === $page.params.id)?.title ?? data.title;
-		console.log(t)
-		if (typeof t === "undefined" || ( typeof t != "undefined" && t.startsWith("Untitled") )) {
-			// this will create an updated title
-			t = summarizeTitle($page.params.id)
-				.then((e) => {
-					invalidate(UrlDependency.ConversationList)
-				})
-				.catch(console.error);
-			dispatch("editConversationTitle", { id: $page.params.id, title: t });
-		}
-		return t;
-	}
 
 	onMount(async () => {
-<<<<<<< HEAD
-		// previousTitle = $title;
-=======
 		// only used in case of creating new conversations (from the parent POST endpoint)
->>>>>>> e3ca107b9dbb93cfa4757c6829dfd47482eef37a
 		if ($pendingMessage) {
 			files = $pendingMessage.files;
 			await writeMessage({ prompt: $pendingMessage.content });
 			$pendingMessage = undefined;
 		}
 	});
-<<<<<<< HEAD
-	$: $page.params.id, (isAborted = true);
-	$: title = fetchTitle(data);
-	$: loginRequired =
-		(data.requiresLogin
-			? !data.user
-			: !data.settings.ethicsModalAcceptedAt && !!PUBLIC_APP_DISCLAIMER) &&
-		messages.length >= data.messagesBeforeLogin;
-=======
 
 	async function onMessage(event: CustomEvent<string>) {
 		if (!data.shared) {
@@ -475,7 +363,6 @@
 	$: title = data.conversations.find((conv) => conv.id === $page.params.id)?.title ?? data.title;
 
 	const convTreeStore = createConvTreeStore();
->>>>>>> e3ca107b9dbb93cfa4757c6829dfd47482eef37a
 </script>
 
 <svelte:head>

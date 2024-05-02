@@ -7,11 +7,8 @@
 	import { page } from "$app/stores";
 
 	import CodeBlock from "../CodeBlock.svelte";
-<<<<<<< HEAD
 	import LatexBlock from "../LatexBlock.svelte";
-=======
 	import CopyToClipBoardBtn from "../CopyToClipBoardBtn.svelte";
->>>>>>> e3ca107b9dbb93cfa4757c6829dfd47482eef37a
 	import IconLoading from "../icons/IconLoading.svelte";
 	import CarbonRotate360 from "~icons/carbon/rotate-360";
 	import CarbonDownload from "~icons/carbon/download";

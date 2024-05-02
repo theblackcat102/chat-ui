@@ -62,16 +62,11 @@
 		"image-size": "^1.0.2",
 		"ip-address": "^9.0.5",
 		"jsdom": "^22.0.0",
-<<<<<<< HEAD
-		"marked": "^4.3.0",
 		"mathjax": "^3.2.2",
-		"mongodb": "^5.3.0",
-=======
 		"json5": "^2.2.3",
 		"marked": "^12.0.1",
 		"marked-katex-extension": "^5.0.1",
 		"mongodb": "^5.8.0",
->>>>>>> e3ca107b9dbb93cfa4757c6829dfd47482eef37a
 		"nanoid": "^4.0.2",
 		"openid-client": "^5.4.2",
 		"parquetjs": "^0.11.2",
